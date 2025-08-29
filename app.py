@@ -24,71 +24,29 @@ SUPABASE_KEY = os.getenv('SUPABASE_KEY')
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 
 # WTForms
-class RegisterForm(FlaskForm):
-    username = StringField('닉네임', validators=[DataRequired(), Length(min=2, max=20)])
-    email = StringField('이메일', validators=[DataRequired(), Email()])
-    height = IntegerField('키', validators=[DataRequired(), NumberRange(min=100, max=250)])
-    target_weight = FloatField('목표 몸무게', validators=[DataRequired(), NumberRange(min=20, max=300)])
-    password = PasswordField('비밀번호', validators=[DataRequired(), Length(min=6)])
-    confirm = PasswordField('비밀번호 확인', validators=[DataRequired(), EqualTo('password')])
-    submit = SubmitField('회원가입')
-
 class LoginForm(FlaskForm):
-    email = StringField('이메일', validators=[DataRequired(), Email()])
     password = PasswordField('비밀번호', validators=[DataRequired()])
-    submit = SubmitField('로그인')
+    submit = SubmitField('입장')
 
-class WeightForm(FlaskForm):
-    weight = FloatField('몸무게', validators=[DataRequired(), NumberRange(min=20, max=300)])
-    submit = SubmitField('저장')
+# 서버 메모리에 비밀번호 저장 (초기값: 12ceri)
+current_password = {'value': '12ceri'}
 
 # 유저 정보 가져오기
 def get_user(user_id):
     res = supabase.table('users').select('*').eq('id', user_id).single().execute()
     return res.data if res.data else None
 
-def get_user_by_email(email):
-    res = supabase.table('users').select('*').eq('email', email).limit(1).execute()
-    if res.data and len(res.data) > 0:
-        return res.data[0]
-    return None
-
-# 회원가입
-@app.route('/register', methods=['GET', 'POST'])
-def register():
-    form = RegisterForm()
-    if form.validate_on_submit():
-        if get_user_by_email(form.email.data):
-            flash('이미 등록된 이메일입니다.')
-            return render_template('register.html', form=form)
-        hashed = generate_password_hash(form.password.data)
-        user = {
-            'username': form.username.data,
-            'email': form.email.data,
-            'height': form.height.data,
-            'target_weight': form.target_weight.data,
-            'password': hashed
-        }
-        res = supabase.table('users').insert(user).execute()
-        if res.data:
-            flash('회원가입 성공! 로그인 해주세요.')
-            return redirect(url_for('login'))
-        else:
-            flash('회원가입 실패. 다시 시도해주세요.')
-    return render_template('register.html', form=form)
-
 # 로그인
 @app.route('/login', methods=['GET', 'POST'])
 def login():
     form = LoginForm()
     if form.validate_on_submit():
-        user = get_user_by_email(form.email.data)
-        if user and check_password_hash(user['password'], form.password.data):
-            session['user_id'] = user['id']
-            flash('로그인 성공!')
+        if form.password.data == current_password['value']:
+            session['is_authenticated'] = True
+            flash('입장 성공!')
             return redirect(url_for('index'))
         else:
-            flash('이메일 또는 비밀번호가 올바르지 않습니다.')
+            flash('비밀번호가 올바르지 않습니다.')
     return render_template('login.html', form=form)
 
 # 로그아웃
@@ -98,27 +56,52 @@ def logout():
     flash('로그아웃 되었습니다.')
     return redirect(url_for('login'))
 
-# 대시보드
-@app.route('/')
-def index():
-    if not session.get('user_id'):
+@app.route('/change_password', methods=['GET', 'POST'])
+def change_password():
+    if not session.get('is_authenticated'):
         return redirect(url_for('login'))
-    user = get_user(session['user_id'])
+    if request.method == 'POST':
+        old_pw = request.form.get('old_password')
+        new_pw = request.form.get('new_password')
+        if old_pw == current_password['value'] and new_pw:
+            current_password['value'] = new_pw
+            flash('비밀번호가 변경되었습니다.')
+            return redirect(url_for('index'))
+        else:
+            flash('기존 비밀번호가 올바르지 않거나 새 비밀번호가 비어 있습니다.')
+    return render_template('change_password.html')
+
+class WeightForm(FlaskForm):
+    weight = FloatField('몸무게', validators=[DataRequired(), NumberRange(min=20, max=300)])
+    submit = SubmitField('저장')
+
+# 대시보드
+@app.route('/', methods=['GET'])
+def index():
+    if not session.get('is_authenticated'):
+        return redirect(url_for('login'))
+    # 단일 사용자용 user_id 고정
+    if not session.get('user_id'):
+        session['user_id'] = 1
+    user_id = session['user_id']
     # 몸무게 기록
-    recs = supabase.table('weight_records').select('*').eq('user_id', user['id']).order('date', desc=True).execute().data or []
+    recs = supabase.table('weight_records').select('*').eq('user_id', user_id).order('date', desc=True).execute().data or []
     latest = recs[0]['weight'] if recs else None
+    # 목표 몸무게, 키 등은 임의 값(예: 65kg, 170cm)으로 고정
+    target_weight = 65
+    height = 170
     # 목표 진행률
     progress = 0
-    if recs and user['target_weight']:
+    if recs:
         start = recs[-1]['weight']
         now = recs[0]['weight']
-        target = user['target_weight']
+        target = target_weight
         progress = int(100 * abs(now - start) / abs(target - start)) if start != target else 100
     # BMI
     bmi = None
     bmi_status = ''
-    if latest and user['height']:
-        h = user['height'] / 100
+    if latest and height:
+        h = height / 100
         bmi = round(latest / (h*h), 1)
         if bmi < 18.5:
             bmi_status = '저체중'
@@ -142,7 +125,7 @@ def index():
     memos = [{'date': r['date'], 'memo': r['memo']} for r in recs if r.get('memo')]
     form = WeightForm()
     return render_template('index.html',
-        target_weight=user['target_weight'],
+        target_weight=target_weight,
         progress=progress,
         bmi=bmi,
         bmi_status=bmi_status,
