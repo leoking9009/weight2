@@ -1,0 +1,12 @@
+Flask
+Flask-Session
+Flask-WTF
+wtforms
+Werkzeug
+supabase
+python-dotenv
+requests
+bcrypt
+pandas
+matplotlib
+gunicorn
