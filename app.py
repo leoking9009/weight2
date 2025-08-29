@@ -165,8 +165,10 @@ def add_weight():
         today = datetime.now().date().isoformat()
         memo = request.form.get('memo', '')
         # 이미 오늘 기록이 있으면 수정
-        rec = supabase.table('weight_records').select('*').eq('user_id', session['user_id']).eq('date', today).single().execute().data
-        if rec:
+        res = supabase.table('weight_records').select('*').eq('user_id', session['user_id']).eq('date', today).execute()
+        recs = res.data or []
+        if recs:
+            rec = recs[0]
             supabase.table('weight_records').update({'weight': weight, 'memo': memo}).eq('id', rec['id']).execute()
             flash('오늘 기록이 수정되었습니다.')
         else:
@@ -215,8 +217,10 @@ def add_memo():
         return redirect(url_for('login'))
     memo = request.form.get('memo', '')
     today = datetime.now().date().isoformat()
-    rec = supabase.table('weight_records').select('*').eq('user_id', session['user_id']).eq('date', today).single().execute().data
-    if rec:
+    res = supabase.table('weight_records').select('*').eq('user_id', session['user_id']).eq('date', today).execute()
+    recs = res.data or []
+    if recs:
+        rec = recs[0]
         supabase.table('weight_records').update({'memo': memo}).eq('id', rec['id']).execute()
         flash('메모가 저장되었습니다.')
     else:
